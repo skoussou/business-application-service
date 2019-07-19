@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: pam-business-app-service
+  annotations:
+    openshift.io/display-name: pam-business-app service Template
+    openshift.io/provider-display-name: Red Hat, Inc.
+    tags: pam-business-app
+parameters:
+- displayName: Application Name
+  description: The name for the application.
+  name: APPLICATION_NAME
+  required: true
+objects:
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${APPLICATION_NAME}-service
+  spec:
+    ports:
+    - port: 8090
+      protocol: TCP
+      targetPort: 8090
+    selector:
+      app: ${APPLICATION_NAME}-service
+      deploymentconfig: ${APPLICATION_NAME}-service
+    type: ClusterIP
+
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: ${APPLICATION_NAME}-service
+  spec:
+    host: ${APPLICATION_NAME}-service.example.com
+    port:
+      targetPort: 8090
+    to:
+      kind: Service
+      name: ${APPLICATION_NAME}-service
+
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    annotations:
+    name: ${APPLICATION_NAME}-service
+  spec:
+    lookupPolicy:
+      local: false
+    tags:
+    - annotations: null
+      from:
+        kind: DockerImage
+        name: ${APPLICATION_NAME}-sb-kie-server:1.0
+      generation: 1
+      importPolicy:
+        insecure: true
+      name: latest
+      referencePolicy:
+        type: Source
+
+-  apiVersion: apps.openshift.io/v1
+   kind: DeploymentConfig
+   metadata:
+     annotations:
+     labels:
+       app: ${APPLICATION_NAME}-service
+     name: ${APPLICATION_NAME}-service
+   spec:
+     replicas: 1
+     revisionHistoryLimit: 10
+     selector:
+       app: ${APPLICATION_NAME}-service
+       deploymentconfig: ${APPLICATION_NAME}-service
+     strategy:
+       activeDeadlineSeconds: 21600
+       resources: {}
+       rollingParams:
+         intervalSeconds: 1
+         maxSurge: 25%
+         maxUnavailable: 25%
+         timeoutSeconds: 600
+         updatePeriodSeconds: 1
+       type: Rolling
+     template:
+       metadata:
+         annotations:
+         creationTimestamp: null
+         labels:
+           app: ${APPLICATION_NAME}-service
+           deploymentconfig: ${APPLICATION_NAME}-service
+       spec:
+         containers:
+         - env:
+           - name: M2_HOME
+             value: /opt/jboss/.m2/
+           name: ${APPLICATION_NAME}-service
+           image: ${APPLICATION_NAME}-sb-kie-server:latest
+           resources:
+             limits:
+               cpu: 500m
+               memory: 1000Mi
+             requests:
+               cpu: 500m
+               memory: 1000Mi
+           volumeMounts:
+           - mountPath: /opt/jboss/business-application-service.xml
+             name: kie-server-state-volume
+             readOnly: true
+             subPath: business-application-service.xml
+           - mountPath: /opt/jboss/.m2/settings.xml
+             name: kie-mvn-settings-volume
+             readOnly: true
+             subPath: settings.xml
+         volumes:
+         - configMap:
+             defaultMode: 420
+             name: business-application-service.xml
+           name: kie-server-state-volume
+         - configMap:
+             defaultMode: 420
+             name: settings
+           name: kie-mvn-settings-volume
+     test: false
+     triggers:
+     - type: ConfigChange
+     - imageChangeParams:
+         automatic: true
+         containerNames:
+         - ${APPLICATION_NAME}-service
+         from:
+           kind: ImageStreamTag
+           name: '${APPLICATION_NAME}-sb-kie-server:1.0'
+       type: ImageChange
